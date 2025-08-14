@@ -24,6 +24,8 @@ jobs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
+      with:
+        driver-opts: network=host
 
     - name: Log in to GitHub Container Registry
       if: github.event_name != 'pull_request'
@@ -45,11 +47,24 @@ jobs:
           type=semver,pattern={{major}}.{{minor}}
           type=raw,value=latest,enable={{is_default_branch}}
 
-    - name: Build and push Docker image
+    # 先构建 AMD64 版本测试
+    - name: Build test image (AMD64 only)
       uses: docker/build-push-action@v5
       with:
         context: .
-        platforms: linux/amd64,linux/arm64
+        platforms: linux/amd64
+        push: false
+        tags: test-image
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    # 如果测试成功，再构建多平台版本
+    - name: Build and push Docker image
+      if: success()
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64  # 先只构建 AMD64，成功后再添加 ARM64
         push: ${{ github.event_name != 'pull_request' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
@@ -62,10 +77,13 @@ jobs:
       if: github.event_name != 'pull_request'
       run: echo ${{ steps.build.outputs.digest }}
 
-    - name: Update README with new image info
-      if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    - name: Build summary
+      if: github.event_name != 'pull_request'
       run: |
-        echo "## Docker 镜像" >> $GITHUB_STEP_SUMMARY
-        echo "镜像已构建并推送到：" >> $GITHUB_STEP_SUMMARY
-        echo "- \`ghcr.io/${{ github.repository }}:latest\`" >> $GITHUB_STEP_SUMMARY
-        echo "- \`ghcr.io/${{ github.repository }}:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "## 🚀 Docker 镜像构建成功" >> $GITHUB_STEP_SUMMARY
+        echo "**镜像地址**: \`ghcr.io/${{ github.repository }}:latest\`" >> $GITHUB_STEP_SUMMARY
+        echo "**使用方法**:" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+        echo "docker pull ghcr.io/${{ github.repository }}:latest" >> $GITHUB_STEP_SUMMARY
+        echo "docker run -d -p 6688:6688 --name anticap-webapi ghcr.io/${{ github.repository }}:latest" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
